@@ -1,0 +1,261 @@
+##########################################################################################################################
+########################################## 65 Steps to install archlinux on ZFS ##########################################
+##########################################################################################################################
+Step1: Reset root password
+    passwd root
+
+Step2: Check IP address
+    ip a
+
+Step3: reset nixos password
+    passwd
+
+Step4: ssh to archiso virtual machine
+    ssh nixos@IP_Address_Of_Nix_VM
+
+Step5: create nix-shell to partition disk and to create btrfs files sytem.
+    nix-shell -p btrfs-progs
+    [nix-shell:~]$ ( echo g; echo n; echo 1; echo  ; echo +1024M; echo t; echo 1; echo n; echo 2; echo  ; echo  ; echo t; echo 2; echo 20; echo w; echo q; ) | sudo fdisk --wipe auto /dev/vda
+
+Step6: verify newly created partitions.
+    [nix-shell:~]$ sudo fdisk -l /dev/vda
+    Disk /dev/vda: 20 GiB, 21474836480 bytes, 41943040 sectors
+    Units: sectors of 1 * 512 = 512 bytes
+    Sector size (logical/physical): 512 bytes / 512 bytes
+    I/O size (minimum/optimal): 512 bytes / 512 bytes
+    Disklabel type: gpt
+    Disk identifier: 5EBD5B79-FDAA-4699-AC7E-CA7A13D2971A
+
+    Device       Start      End  Sectors Size Type
+    /dev/vda1     2048  2099199  2097152   1G EFI System
+    /dev/vda2  2099200 41940991 39841792  19G Linux filesystem
+
+Step7: Create file system on EFI partition
+    sudo mkfs.fat -F 32 /dev/vda1
+
+Step8: Create file system on btrfs partition
+    sudo mkfs.btrfs /dev/vda2
+
+Step8: mount btrfs partition to /mnt
+    sudo mount /dev/vda2 /mnt
+    
+Step9: create list of subvolume on /mnt
+    # For root
+    sudo btrfs subvolume create /mnt/root
+    # For home
+    sudo btrfs subvolume create /mnt/home
+    # For nix
+    sudo btrfs subvolume create /mnt/nix
+
+Step10: To unmount all volume and subvolume mounted at /mnt
+    sudo umount /mnt
+
+Step11: To mount root subvol at /mnt
+    sudo mount -o compress=zstd,noatime,compress=zstd,ssd,space_cache=v2,subvol=root /dev/vda2 /mnt
+    sudo mkdir /mnt/{home,nix}
+    
+Step11: To create directories to mount home and nix subvol
+    sudo mkdir /mnt/{home,nix,boot}
+    sudo mount -o compress=zstd,noatime,compress=zstd,ssd,space_cache=v2,subvol=home /dev/vda2 /mnt/home
+    sudo mount -o compress=zstd,noatime,compress=zstd,ssd,space_cache=v2,subvol=nix /dev/vda2 /mnt/nix
+    sudo mount /dev/vda1 /mnt/boot
+
+Step12: Generate nixos config
+    sudo nixos-generate-config --root /mnt
+    
+Step13: Install NixOS
+    nixos-install
+
+[pranav@nixos:/etc/nixos]$ cat configuration.nix
+# Edit this configuration file to define what should be installed on
+# your system. Help is available in the configuration.nix(5) man page, on
+# https://search.nixos.org/options and in the NixOS manual (`nixos-help`).
+
+{ config, lib, pkgs, ... }:
+
+{
+  imports =
+    [ # Include the results of the hardware scan.
+      ./hardware-configuration.nix
+    ];
+
+  # Use the systemd-boot EFI boot loader.
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+
+  networking.hostName = "nixos"; # Define your hostname.
+  # Pick only one of the below networking options.
+  # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
+  networking.networkmanager.enable = true;  # Easiest to use and most distros use this by default.
+
+  # Set your time zone.
+  time.timeZone = "America/New_York";
+
+  # Configure network proxy if necessary
+  # networking.proxy.default = "http://user:password@proxy:port/";
+  # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";
+
+  # Select internationalisation properties.
+  i18n.defaultLocale = "en_US.UTF-8";
+  console = {
+    earlySetup = true;
+    #font = "Lat2-Terminus16";
+    font = "${pkgs.terminus_font}/share/consolefonts/ter-132n.psf.gz";
+    packages = with pkgs; [ terminus_font ];
+    keyMap = "us";
+    #useXkbConfig = true; # use xkb.options in tty.
+   };
+
+  # To enable ZRAM
+  zramSwap.enable = true;
+  zramSwap.memoryPercent = 25;
+
+
+  # Enable the X11 windowing system.
+ services.xserver.enable = true;
+ services.displayManager.sddm.enable = true;
+ services.displayManager.sddm.wayland.enable = true;
+ services.desktopManager.plasma6.enable = true;
+  
+
+  # Configure keymap in X11
+  #services.xserver.xkb.layout = "us";
+  #services.xserver.xkb.options = "eurosign:e,caps:escape";
+
+  # Enable CUPS to print documents.
+  services.printing.enable = true;
+
+  # Enable sound.
+  hardware.pulseaudio.enable = true;
+  # OR
+  services.pipewire = {
+     enable = false;
+     pulse.enable = true;
+  };
+
+  # Enable touchpad support (enabled default in most desktopManager).
+  # services.libinput.enable = true;
+ nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
+            "citrix-workspace"
+            "zoom"
+           ];
+
+  # Define a user account. Don't forget to set a password with ‘passwd’.
+  users.users.pranav = {
+     isNormalUser = true;
+     extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
+     packages = with pkgs; [
+       tree
+       firefox
+       citrix_workspace_24_02_0
+       zoom-us
+     ];
+   };
+
+  # programs.firefox.enable = true;
+
+  # List packages installed in system profile. To search, run:
+  # $ nix search wget
+  environment.systemPackages = with pkgs; [
+    vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
+    wget
+  ];
+
+  # Some programs need SUID wrappers, can be configured further or are
+  # started in user sessions.
+  # programs.mtr.enable = true;
+  # programs.gnupg.agent = {
+  #   enable = true;
+  #   enableSSHSupport = true;
+  # };
+
+  # List services that you want to enable:
+
+  # Enable the OpenSSH daemon.
+  services.openssh.enable = true;
+
+  # Open ports in the firewall.
+  # networking.firewall.allowedTCPPorts = [ ... ];
+  # networking.firewall.allowedUDPPorts = [ ... ];
+  # Or disable the firewall altogether.
+  networking.firewall.enable = false;
+
+  # Copy the NixOS configuration file and link it from the resulting system
+  # (/run/current-system/configuration.nix). This is useful in case you
+  # accidentally delete configuration.nix.
+  system.copySystemConfiguration = true;
+
+  # This option defines the first version of NixOS you have installed on this particular machine,
+  # and is used to maintain compatibility with application data (e.g. databases) created on older NixOS versions.
+  #
+  # Most users should NEVER change this value after the initial install, for any reason,
+  # even if you've upgraded your system to a new NixOS release.
+  #
+  # This value does NOT affect the Nixpkgs version your packages and OS are pulled from,
+  # so changing it will NOT upgrade your system - see https://nixos.org/manual/nixos/stable/#sec-upgrading for how
+  # to actually do that.
+  #
+  # This value being lower than the current NixOS release does NOT mean your system is
+  # out of date, out of support, or vulnerable.
+  #
+  # Do NOT change this value unless you have manually inspected all the changes it would make to your configuration,
+  # and migrated your data accordingly.
+  #
+  # For more information, see `man configuration.nix` or https://nixos.org/manual/nixos/stable/options#opt-system.stateVersion .
+  system.stateVersion = "24.11"; # Did you read the comment?
+
+}
+
+[pranav@nixos:/etc/nixos]$ cat hardware-configuration.nix
+# Do not modify this file!  It was generated by ‘nixos-generate-config’
+# and may be overwritten by future invocations.  Please make changes
+# to /etc/nixos/configuration.nix instead.
+{ config, lib, pkgs, modulesPath, ... }:
+
+{
+  imports =
+    [ (modulesPath + "/profiles/qemu-guest.nix")
+    ];
+
+  boot.initrd.availableKernelModules = [ "ahci" "xhci_pci" "virtio_pci" "sr_mod" "virtio_blk" ];
+  boot.initrd.kernelModules = [ ];
+  boot.kernelModules = [ "kvm-intel" "video=1920x1080" ];
+  boot.extraModulePackages = [ ];
+
+  fileSystems."/" =
+    { device = "/dev/disk/by-uuid/9f319fa5-6ba3-4e88-be7d-271a095eb88e";
+      fsType = "btrfs";
+      options = [ "subvol=root" "rw" "noatime" "compress=zstd" "ssd" "discard=async" "space_cache=v2" ];
+    };
+
+  fileSystems."/home" =
+    { device = "/dev/disk/by-uuid/9f319fa5-6ba3-4e88-be7d-271a095eb88e";
+      fsType = "btrfs";
+      options = [ "subvol=home" "rw" "noatime" "compress=zstd" "ssd" "discard=async" "space_cache=v2" ];
+    };
+
+  fileSystems."/nix" =
+    { device = "/dev/disk/by-uuid/9f319fa5-6ba3-4e88-be7d-271a095eb88e";
+      fsType = "btrfs";
+      options = [ "subvol=nix" "rw" "noatime" "compress=zstd" "ssd" "discard=async" "space_cache=v2" ];
+    };
+
+  fileSystems."/boot" =
+    { device = "/dev/disk/by-uuid/9B27-A06B";
+      fsType = "vfat";
+      options = [ "fmask=0022" "dmask=0022" ];
+    };
+
+  swapDevices = [ ];
+
+  # Enables DHCP on each ethernet and wireless interface. In case of scripted networking
+  # (the default) this is the recommended approach. When using systemd-networkd it's
+  # still possible to use this option, but it's recommended to use it in conjunction
+  # with explicit per-interface declarations with `networking.interfaces.<interface>.useDHCP`.
+  networking.useDHCP = lib.mkDefault true;
+  # networking.interfaces.ens1.useDHCP = lib.mkDefault true;
+
+  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+}
+
+[pranav@nixos:/etc/nixos]$ 
