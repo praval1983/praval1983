@@ -149,6 +149,7 @@ Step13: Install NixOS
        firefox
        citrix_workspace_24_02_0
        zoom-us
+       keepassxc
      ];
    };
 
