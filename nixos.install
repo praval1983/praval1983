@@ -67,16 +67,17 @@ Step13: Install NixOS
     nixos-install
 
 [pranav@nixos:/etc/nixos]$ cat configuration.nix
+[pranav@nixos:~]$ cat /etc/nixos/configuration.nix
 # Edit this configuration file to define what should be installed on
 # your system. Help is available in the configuration.nix(5) man page, on
 # https://search.nixos.org/options and in the NixOS manual (`nixos-help`).
-
 { config, lib, pkgs, ... }:
 
 {
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
+      <home-manager/nixos>
     ];
 
   # Use the systemd-boot EFI boot loader.
@@ -98,12 +99,8 @@ Step13: Install NixOS
   # Select internationalisation properties.
   i18n.defaultLocale = "en_US.UTF-8";
   console = {
-    earlySetup = true;
-    #font = "Lat2-Terminus16";
-    font = "${pkgs.terminus_font}/share/consolefonts/ter-132n.psf.gz";
-    packages = with pkgs; [ terminus_font ];
+    font = "Lat2-Terminus16";
     keyMap = "us";
-    #useXkbConfig = true; # use xkb.options in tty.
    };
 
   # To enable ZRAM
@@ -112,11 +109,18 @@ Step13: Install NixOS
 
 
   # Enable the X11 windowing system.
- services.xserver.enable = true;
- services.displayManager.sddm.enable = true;
- services.displayManager.sddm.wayland.enable = true;
- services.desktopManager.plasma6.enable = true;
-  
+  services.xserver.enable = true;
+  # To enable sddm.
+  services.displayManager.sddm.enable = true;
+  # To enable wayland on sddm.
+  services.displayManager.sddm.wayland.enable = true;
+  # To enable plasma6 desktopManager.
+  services.desktopManager.plasma6.enable = true;
+  # To limit journald log size to 2G.
+  services.journald.extraConfig = ''
+        SystemMaxUse=2G
+    '';
+
 
   # Configure keymap in X11
   #services.xserver.xkb.layout = "us";
@@ -129,29 +133,48 @@ Step13: Install NixOS
   hardware.pulseaudio.enable = true;
   # OR
   services.pipewire = {
-     enable = false;
-     pulse.enable = true;
+    enable = false;
+    pulse.enable = true;
   };
 
   # Enable touchpad support (enabled default in most desktopManager).
   # services.libinput.enable = true;
- nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
-            "citrix-workspace"
-            "zoom"
-           ];
 
+  # To enable falkes
+  nix.settings.experimental-features = [
+    "nix-command"
+    "flakes"
+  ];
+
+  # To allow list of unfree packages.
+  nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
+             "citrix-workspace"
+             "zoom"
+           ];
+  # To configure garbage collector
+  nix.gc = {
+    automatic = true;
+    dates = "01:00";
+    #interval = { Weekday = 0; Hour = 0; Minute = 0; };
+    options = "--delete-older-than 7d";
+  };
+  nix.extraOptions = ''
+     min-free = ${toString (100 * 1024 * 1024)}
+     max-free = ${toString (1024 * 1024 * 1024)}
+    '';
   # Define a user account. Don't forget to set a password with ‘passwd’.
   users.users.pranav = {
-     isNormalUser = true;
-     extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
-     packages = with pkgs; [
-       tree
-       firefox
-       citrix_workspace_24_02_0
-       zoom-us
-       keepassxc
-     ];
-   };
+    isNormalUser = true;
+    extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
+    packages = with pkgs; [
+      tree
+      firefox
+      citrix_workspace_24_02_0
+      zoom-us
+      keepassxc
+      thunderbird
+    ];
+  };
 
   # programs.firefox.enable = true;
 
@@ -204,7 +227,6 @@ Step13: Install NixOS
   #
   # For more information, see `man configuration.nix` or https://nixos.org/manual/nixos/stable/options#opt-system.stateVersion .
   system.stateVersion = "24.11"; # Did you read the comment?
-
 }
 
 [pranav@nixos:/etc/nixos]$ cat hardware-configuration.nix
